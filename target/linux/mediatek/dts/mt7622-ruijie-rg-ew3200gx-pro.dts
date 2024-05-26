@@ -24,51 +24,44 @@
 			#address-cells = <1>;
 			#size-cells = <1>;
 
-			partition@0 {
+			partition@00000 {
 				label = "Preloader";
-				reg = <0x0 0x40000>;
-				read-only;
+				reg = <0x00 0x20000>;
 			};
 
 			partition@40000 {
 				label = "ATF";
-				reg = <0x40000 0x20000>;
-				read-only;
+				reg = <0x20000 0x10000>;
 			};
 
 			partition@60000 {
 				label = "u-boot";
-				reg = <0x60000 0x50000>;
-				read-only;
+				reg = <0x30000 0x50000>;
 			};
 
 			partition@B0000 {
 				label = "u-boot-env";
-				reg = <0xb0000 0x20000>;
+				reg = <0x80000 0x10000>;
 			};
 
-			factory: partition@D0000 {
+			partition@D0000 {
 				label = "Factory";
-				reg = <0xd0000 0x80000>;
-				read-only;
+				reg = <0x90000 0x40000>;
 			};
 
 			partition@150000 {
 				label = "product_info";
-				reg = <0x150000 0x10000>;
-				read-only;
+				reg = <0xd0000 0x10000>;
 			};
 
 			partition@160000 {
 				label = "kdump";
-				reg = <0x160000 0x10000>;
-				read-only;
+				reg = <0xe0000 0x10000>;
 			};
 
 			partition@170000 {
-				compatible = "denx,fit";
 				label = "firmware";
-				reg = <0x170000 0xe90000>;
+				reg = <0xf0000 0xf10000>;
 			};
 		};
 	};
