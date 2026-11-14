@@ -6,12 +6,14 @@
 #
 include $(TOPDIR)/rules.mk
 
-PKG_VERSION := 2024.04
-PKG_RELEASE:=1
+PKG_VERSION := 2026.04
+PKG_RELEASE := 1
 
-PKG_HASH := 18a853fe39fad7ad03a90cc2d4275aeaed6da69735defac3492b80508843dd4a
+PKG_HASH := ac7c04b8b7004923b00a4e5d6699c5df4d21233bac9fda690d8cfbc209fff2fd
 
 PKG_MAINTAINER := Tomasz Maciej Nowak <tmn505@gmail.com>
+
+UBOOT_USE_INTREE_DTC:=1
 
 include $(INCLUDE_DIR)/u-boot.mk
 include $(INCLUDE_DIR)/package.mk
@@ -31,6 +33,8 @@ define U-Boot/trimslice
 endef
 
 UBOOT_TARGETS := trimslice
+
+UBOOT_CUSTOMIZE_CONFIG := --disable TOOLS_MKEFICAPSULE
 
 define Build/bct-image
 	$(CP) $(PKG_BUILD_DIR)/u-boot-dtb-tegra.bin $(PKG_BUILD_DIR)/u-boot.bin

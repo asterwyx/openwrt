@@ -44,7 +44,7 @@ define autoreconf
 				touch NEWS AUTHORS COPYING ABOUT-NLS ChangeLog; \
 				$(AM_TOOL_PATHS) \
 					LIBTOOLIZE='$(STAGING_DIR_HOST)/bin/libtoolize --install' \
-					$(STAGING_DIR_HOST)/bin/autoreconf -v -f -i -s \
+					$(STAGING_DIR_HOST)/bin/autoreconf -v -f -i \
 					$(if $(word 2,$(3)),--no-recursive) \
 					-B $(STAGING_DIR_HOST)/share/aclocal \
 					$(patsubst %,-I %,$(5)) \
@@ -81,6 +81,14 @@ PKG_MACRO_PATHS?=m4
 PKG_REMOVE_FILES?=aclocal.m4
 
 Hooks/InstallDev/Post += libtool_remove_files
+
+# host .la files name other .la files by absolute path, which breaks
+# prebuilt tools used from another directory
+define libtool_remove_files_host
+	$(call libtool_remove_files,$(STAGING_DIR_HOST)/lib)
+endef
+
+Hooks/HostInstall/Post += libtool_remove_files_host
 
 define autoreconf_target
   $(strip $(call autoreconf, \

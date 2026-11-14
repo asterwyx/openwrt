@@ -67,6 +67,7 @@
 
 		nvmem-cells = <&macaddr_info_8 1>, <&precalibration_ath10k>;
 		nvmem-cell-names = "mac-address", "pre-calibration";
+		qcom,calibration-variant = "TP-Link-EAP225-Wall-v2";
 	};
 };
 
@@ -139,7 +140,7 @@
 				read-only;
 			};
 
-			art: partition@ff0000 {
+			partition@ff0000 {
 				label = "art";
 				reg = <0xff0000 0x010000>;
 				read-only;

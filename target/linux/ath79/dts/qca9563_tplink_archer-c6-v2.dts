@@ -27,12 +27,6 @@
 			default-state = "on";
 		};
 
-		wlan2g {
-			label = "green:wlan2g";
-			gpios = <&gpio 15 GPIO_ACTIVE_LOW>;
-			linux,default-trigger = "phy1tpt";
-		};
-
 		wlan5g {
 			label = "green:wlan5g";
 			gpios = <&gpio 19 GPIO_ACTIVE_LOW>;
@@ -89,6 +83,7 @@
 		reg = <0x0000 0 0 0 0>;
 		nvmem-cells = <&precal_art_5000>, <&macaddr_info_8 (-1)>;
 		nvmem-cell-names = "pre-calibration", "mac-address";
+		qcom,ath10k-calibration-variant = "TP-Link-Archer-c6-v2";
 	};
 };
 
@@ -111,7 +106,7 @@
 				read-only;
 			};
 
-			info: partition@20000 {
+			partition@20000 {
 				label = "info";
 				reg = <0x020000 0x010000>;
 				read-only;
@@ -141,7 +136,7 @@
 				read-only;
 			};
 
-			art: partition@7f0000 {
+			partition@7f0000 {
 				label = "art";
 				reg = <0x7f0000 0x010000>;
 				read-only;
@@ -150,6 +145,10 @@
 					compatible = "fixed-layout";
 					#address-cells = <1>;
 					#size-cells = <1>;
+
+					cal_art_1000: calibration@1000 {
+						reg = <0x1000 0x440>;
+					};
 
 					precal_art_5000: pre-calibration@5000 {
 						reg = <0x5000 0x2f20>;
@@ -166,8 +165,11 @@
 };
 
 &wmac {
-	mtd-cal-data = <&art 0x1000>;
+	nvmem-cells = <&macaddr_info_8 0>, <&cal_art_1000>;
+	nvmem-cell-names = "mac-address", "calibration";
 
-	nvmem-cells = <&macaddr_info_8 0>;
-	nvmem-cell-names = "mac-address";
+	led {
+		led-sources = <15>;
+		led-active-low;
+	};
 };

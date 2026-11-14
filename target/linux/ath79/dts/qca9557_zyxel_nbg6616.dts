@@ -6,7 +6,7 @@
 
 / {
 	compatible = "zyxel,nbg6616", "qca,qca9557";
-	model = "ZyXEL NBG6616";
+	model = "Zyxel NBG6616";
 
 	aliases {
 		led-boot = &led_power;
@@ -36,12 +36,6 @@
 			gpios = <&gpio 14 GPIO_ACTIVE_LOW>;
 			linux,default-trigger = "usbport";
 			trigger-sources = <&hub_port1>;
-		};
-
-		wifi2g {
-			label = "green:wifi2g";
-			gpios = <&gpio 19 GPIO_ACTIVE_LOW>;
-			linux,default-trigger = "phy1tpt";
 		};
 
 		wifi5g {
@@ -84,9 +78,17 @@
 			partition@30000 {
 				label = "u-boot-env";
 				reg = <0x030000 0x010000>;
+
+				nvmem-layout {
+					compatible = "u-boot,env";
+
+					macaddr_uboot_ethaddr: ethaddr {
+						#nvmem-cell-cells = <1>;
+					};
+				};
 			};
 
-			art: partition@40000 {
+			partition@40000 {
 				label = "art";
 				reg = <0x040000 0x010000>;
 				read-only;
@@ -95,6 +97,10 @@
 					compatible = "fixed-layout";
 					#address-cells = <1>;
 					#size-cells = <1>;
+
+					cal_art_1000: calibration@1000 {
+						reg = <0x1000 0x440>;
+					};
 
 					cal_art_5000: calibration@5000 {
 						reg = <0x5000 0x844>;
@@ -132,7 +138,14 @@
 	wifi@0,0 {
 		compatible = "qcom,ath10k";
 		reg = <0 0 0 0 0>;
-		nvmem-cells = <&cal_art_5000>;
-		nvmem-cell-names = "calibration";
+		nvmem-cells = <&cal_art_5000>, <&macaddr_uboot_ethaddr 1>;
+		nvmem-cell-names = "calibration", "mac-address";
+	};
+};
+
+&wmac {
+	led {
+		led-sources = <19>;
+		led-active-low;
 	};
 };

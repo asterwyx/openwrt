@@ -165,26 +165,9 @@ part_magic_fat() {
 	[ "$magic" = "FAT" ] || [ "$magic_fat32" = "FAT32" ]
 }
 
-fitblk_get_bootdev() {
-	[ -e /sys/firmware/devicetree/base/chosen/rootdisk ] || return
-
-	local rootdisk="$(cat /sys/firmware/devicetree/base/chosen/rootdisk)"
-	local handle bootdev
-	for handle in /sys/class/block/*/of_node/phandle /sys/class/block/*/device/of_node/phandle; do
-		[ ! -e "$handle" ] && continue
-		if [ "$rootdisk" = "$(cat $handle)" ]; then
-			bootdev="${handle%/of_node/phandle}"
-			bootdev="${bootdev%/device}"
-			bootdev="${bootdev#/sys/class/block/}"
-			echo "$bootdev"
-			break
-		fi
-	done
-}
-
 export_bootdevice() {
 	local cmdline uuid blockdev uevent line class
-	local MAJOR MINOR DEVNAME DEVTYPE
+	local MAJOR MINOR DEVNAME DEVTYPE DISKSEQ PARTN
 	local rootpart="$(cmdline_get_var root)"
 
 	case "$rootpart" in
@@ -213,7 +196,6 @@ export_bootdevice() {
 			done
 		;;
 		/dev/*)
-			[ "$rootpart" = "/dev/fit0" ] && rootpart="$(fitblk_get_bootdev)"
 			uevent="/sys/class/block/${rootpart##*/}/../uevent"
 		;;
 		0x[a-f0-9][a-f0-9][a-f0-9] | 0x[a-f0-9][a-f0-9][a-f0-9][a-f0-9] | \
@@ -234,8 +216,7 @@ export_bootdevice() {
 		while read line; do
 			export -n "$line"
 		done < "$uevent"
-		export BOOTDEV_MAJOR=$MAJOR
-		export BOOTDEV_MINOR=$MINOR
+		export BOOTDEV_DISKSEQ=$DISKSEQ
 		return 0
 	fi
 
@@ -243,16 +224,18 @@ export_bootdevice() {
 }
 
 export_partdevice() {
-	local var="$1" offset="$2"
-	local uevent line MAJOR MINOR DEVNAME DEVTYPE
+	local var="$1" partn="$2"
+	local uevent line MAJOR MINOR DEVNAME DEVTYPE DISKSEQ PARTN
 
 	for uevent in /sys/class/block/*/uevent; do
 		while read line; do
 			export -n "$line"
 		done < "$uevent"
-		if [ "$BOOTDEV_MAJOR" = "$MAJOR" -a $(($BOOTDEV_MINOR + $offset)) = "$MINOR" -a -b "/dev/$DEVNAME" ]; then
-			export "$var=$DEVNAME"
-			return 0
+		if [ "$BOOTDEV_DISKSEQ" = "$DISKSEQ" -a -b "/dev/$DEVNAME" ]; then
+			if [ "$PARTN" = "$partn" -a "$DEVTYPE" = "partition" ] || [ "$partn" = "0" -a "$DEVTYPE" = "disk" ]; then
+				export "$var=$DEVNAME"
+				return 0
+			fi
 		fi
 	done
 

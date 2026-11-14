@@ -24,6 +24,7 @@ define Device/ubnt_amplifi-router-hd
   UBNT_TYPE := AFi-R
   UBNT_VERSION := 3.6.3
   SOC := qca9563
+  DEVICE_VENDOR := Ubiquiti
   DEVICE_MODEL := AmpliFi Router HD
   UBNT_CHIP := qca956x
   DEVICE_PACKAGES += kmod-ath10k-ct-smallbuffers ath10k-firmware-qca988x-ct kmod-usb2
@@ -57,8 +58,9 @@ TARGET_DEVICES += ubnt_edgeswitch-5xp
 define Device/ubnt_edgeswitch-8xp
   $(Device/ubnt-sw)
   DEVICE_MODEL := EdgeSwitch 8XP
-  DEVICE_PACKAGES += kmod-switch-bcm53xx-mdio
-  DEFAULT := n
+  DEVICE_PACKAGES += kmod-dsa-b53-mdio -swconfig
+  DEVICE_COMPAT_VERSION := 1.1
+  DEVICE_COMPAT_MESSAGE := Config cannot be migrated from swconfig to DSA
 endef
 TARGET_DEVICES += ubnt_edgeswitch-8xp
 
@@ -140,6 +142,14 @@ define Device/ubnt_nanostation-loco-m-xw
   SUPPORTED_DEVICES += loco-m-xw nanostation-m-xw ubnt,nanobeam-m5-xw
 endef
 TARGET_DEVICES += ubnt_nanostation-loco-m-xw
+
+define Device/ubnt_nanostation-loco-m-xw-v2
+  $(Device/ubnt-xw)
+  DEVICE_MODEL := Nanostation Loco M
+  DEVICE_VARIANT := XW v2
+  DEVICE_PACKAGES += rssileds -kmod-usb2
+endef
+TARGET_DEVICES += ubnt_nanostation-loco-m-xw-v2
 
 define Device/ubnt_nanostation-m-xw
   $(Device/ubnt-xw)
@@ -319,6 +329,7 @@ define Device/ubnt_unifi-ap-outdoor-plus
   $(Device/ubnt-unifi-jffs2)
   DEVICE_MODEL := UniFi AP Outdoor+
   SUPPORTED_DEVICES += unifi-outdoor-plus
+  DEFAULT := n
 endef
 TARGET_DEVICES += ubnt_unifi-ap-outdoor-plus
 
@@ -328,5 +339,6 @@ define Device/ubnt_unifi-ap-pro
   DEVICE_MODEL := UniFi AP Pro
   UBNT_CHIP := ar934x
   SUPPORTED_DEVICES += uap-pro
+  DEFAULT := n
 endef
 TARGET_DEVICES += ubnt_unifi-ap-pro

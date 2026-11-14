@@ -5,6 +5,7 @@
 override TARGET_BUILD=
 include $(INCLUDE_DIR)/prereq.mk
 include $(INCLUDE_DIR)/kernel.mk
+include $(INCLUDE_DIR)/kernel-defaults.mk
 include $(INCLUDE_DIR)/version.mk
 include $(INCLUDE_DIR)/image-commands.mk
 
@@ -20,6 +21,11 @@ include $(INCLUDE_DIR)/rootfs.mk
 override MAKE:=$(_SINGLE)$(SUBMAKE)
 override NO_TRACE_MAKE:=$(_SINGLE)$(NO_TRACE_MAKE)
 
+##@
+# @brief Convert size with unit postfix to unitless expression in bytes.
+#
+# @param 1: Size with unit. Possible unit postfix are `g`, `m`, `k`.
+##
 exp_units = $(subst k, * 1024,$(subst m, * 1024k,$(subst g, * 1024m,$(1))))
 
 target_params = $(subst +,$(space),$*)
@@ -35,6 +41,9 @@ KDIR=$(KERNEL_BUILD_DIR)
 KDIR_TMP=$(KDIR)/tmp
 DTS_DIR:=$(LINUX_DIR)/arch/$(LINUX_KARCH)/boot/dts
 
+ifeq ($(EXTRA_IMAGE_NAME),)
+EXTRA_IMAGE_NAME:=$(call qstrip,$(CONFIG_EXTRA_IMAGE_NAME))
+endif
 IMG_PREFIX_EXTRA:=$(if $(EXTRA_IMAGE_NAME),$(call sanitize,$(EXTRA_IMAGE_NAME))-)
 IMG_PREFIX_VERNUM:=$(if $(CONFIG_VERSION_FILENAMES),$(call sanitize,$(VERSION_NUMBER))-)
 IMG_PREFIX_VERCODE:=$(if $(CONFIG_VERSION_CODE_FILENAMES),$(call sanitize,$(VERSION_CODE))-)
@@ -80,10 +89,12 @@ SQUASHFS_BLOCKSIZE := $(CONFIG_TARGET_SQUASHFS_BLOCK_SIZE)k
 SQUASHFSOPT := -b $(SQUASHFS_BLOCKSIZE)
 SQUASHFSOPT += -p '/dev d 755 0 0' -p '/dev/console c 600 0 0 5 1'
 SQUASHFSOPT += $(if $(CONFIG_SELINUX),-xattrs,-no-xattrs)
+SQUASHFSOPT += -block-readers $(CONFIG_TARGET_SQUASHFS_BLOCK_READERS)
+SQUASHFSOPT += -small-readers $(CONFIG_TARGET_SQUASHFS_SMALL_READERS)
 SQUASHFSCOMP := gzip
 LZMA_XZ_OPTIONS := -Xpreset 9 -Xe -Xlc 0 -Xlp 2 -Xpb 2
 ifeq ($(CONFIG_SQUASHFS_XZ),y)
-  ifneq ($(filter arm x86 powerpc sparc,$(LINUX_KARCH)),)
+  ifneq ($(filter arm x86 powerpc,$(LINUX_KARCH)),)
     BCJ_FILTER:=-Xbcj $(LINUX_KARCH)
   endif
   SQUASHFSCOMP := xz $(LZMA_XZ_OPTIONS) $(BCJ_FILTER)
@@ -91,14 +102,29 @@ endif
 
 JFFS2_BLOCKSIZE ?= 64k 128k
 
+EROFS_PCLUSTERSIZE = $(shell echo $$(($(CONFIG_TARGET_EROFS_PCLUSTER_SIZE)*1024)))
+EROFSOPT := -Efragments,dedupe,ztailpacking -Uclear --all-root
+EROFSOPT += $(if $(SOURCE_DATE_EPOCH),-T$(SOURCE_DATE_EPOCH) --ignore-mtime)
+EROFSOPT += $(if $(CONFIG_SELINUX),,-x-1)
+EROFSCOMP := lz4hc,12
+ifeq ($(CONFIG_EROFS_FS_ZIP_LZMA),y)
+EROFSCOMP := lzma,109
+endif
+
 fs-types-$(CONFIG_TARGET_ROOTFS_SQUASHFS) += squashfs
 fs-types-$(CONFIG_TARGET_ROOTFS_JFFS2) += $(addprefix jffs2-,$(JFFS2_BLOCKSIZE))
 fs-types-$(CONFIG_TARGET_ROOTFS_JFFS2_NAND) += $(addprefix jffs2-nand-,$(NAND_BLOCKSIZE))
 fs-types-$(CONFIG_TARGET_ROOTFS_EXT4FS) += ext4
 fs-types-$(CONFIG_TARGET_ROOTFS_UBIFS) += ubifs
+fs-types-$(CONFIG_TARGET_ROOTFS_EROFS) += erofs
+fs-types-$(CONFIG_TARGET_ROOTFS_TARGZ) += targz
 fs-subtypes-$(CONFIG_TARGET_ROOTFS_JFFS2) += $(addsuffix -raw,$(addprefix jffs2-,$(JFFS2_BLOCKSIZE)))
 
 TARGET_FILESYSTEMS := $(fs-types-y)
+
+ifneq ($(ROOTFS_FILESYSTEM),)
+TARGET_FILESYSTEMS := $(filter $(ROOTFS_FILESYSTEM) $(ROOTFS_FILESYSTEM)-%,$(TARGET_FILESYSTEMS))
+endif
 
 FS_64K := $(filter-out jffs2-%,$(TARGET_FILESYSTEMS)) jffs2-64k
 FS_128K := $(filter-out jffs2-%,$(TARGET_FILESYSTEMS)) jffs2-128k
@@ -110,6 +136,12 @@ endef
 
 PROFILE_SANITIZED := $(call tolower,$(subst DEVICE_,,$(subst $(space),-,$(PROFILE))))
 
+##@
+# @brief Call function for each group of arguments.
+#
+# @param 1: List of lists of arguments. Lists are separated by `|`.
+# @param 2: Function to call for list of arguments.
+##
 define split_args
 $(foreach data, \
 	$(subst |,$(space),\
@@ -117,12 +149,24 @@ $(foreach data, \
 	$(call $(2),$(strip $(subst ^,$(space),$(data)))))
 endef
 
+##@
+# @brief Call build function with arguments.
+#
+# @param 1: Function to call. Function name is prepended with `Build/`.
+# @param 2...: Function arguments.
+##
 define build_cmd
 $(if $(Build/$(word 1,$(1))),,$(error Missing Build/$(word 1,$(1))))
 $(call Build/$(word 1,$(1)),$(wordlist 2,$(words $(1)),$(1)))
 
 endef
 
+##@
+# @brief Call build functions from the list.
+#
+# @param 1: List of build functions with arguments, separated by `|`.
+#           First word in each group is a build command without `Build/` prefix.
+##
 define concat_cmd
 $(call split_args,$(1),build_cmd)
 endef
@@ -141,14 +185,6 @@ define Image/BuildKernel/MkuImage
 		-n '$(call toupper,$(ARCH)) $(VERSION_DIST) Linux-$(LINUX_VERSION)' -d $(4) $(5)
 endef
 
-ifdef CONFIG_TARGET_IMAGES_GZIP
-  define Image/Gzip
-	rm -f $(1).gz
-	gzip -9n $(1)
-  endef
-endif
-
-
 # Disable noisy checks by default as in upstream
 DTC_WARN_FLAGS := \
   -Wno-interrupt_provider \
@@ -162,6 +198,12 @@ DTC_WARN_FLAGS := \
 DTC_FLAGS += $(DTC_WARN_FLAGS)
 DTCO_FLAGS += $(DTC_WARN_FLAGS)
 
+##@
+# @brief Pad file to specified size.
+#
+# @param 1: File.
+# @param 2: Padding.
+##
 define Image/pad-to
 	dd if=$(1) of=$(1).new bs=$(2) conv=sync
 	mv $(1).new $(1)
@@ -170,10 +212,6 @@ endef
 ifeq ($(DUMP),)
 ROOTFS_PARTSIZE=$(shell echo $$(($(CONFIG_TARGET_ROOTFS_PARTSIZE)*1024*1024)))
 endif
-
-define Image/pad-root-squashfs
-	$(call Image/pad-to,$(KDIR)/root.squashfs,$(if $(1),$(1),$(ROOTFS_PARTSIZE)))
-endef
 
 # $(1) source dts file
 # $(2) target dtb file
@@ -264,6 +302,7 @@ define Image/mkfs/ubifs
 		$(if $(CONFIG_TARGET_UBIFS_COMPRESSION_LZO),--compr=lzo) \
 		$(if $(CONFIG_TARGET_UBIFS_COMPRESSION_ZLIB),--compr=zlib) \
 		$(if $(shell echo $(CONFIG_TARGET_UBIFS_JOURNAL_SIZE)),--jrn-size=$(CONFIG_TARGET_UBIFS_JOURNAL_SIZE)) \
+		$(if $(IMG_PART_DISKGUID),--uuid-node=$(subst -,,$(IMG_PART_DISKGUID))) \
 		--squash-uids \
 		-o $@ -d $(call mkfs_target_dir,$(1))
 endef
@@ -277,9 +316,23 @@ define Image/mkfs/ext4
 		$@ $(call mkfs_target_dir,$(1))/
 endef
 
+# Don't use the mkfs.erofs builtin $SOURCE_DATE_EPOCH behavior
+define Image/mkfs/erofs
+	env -u SOURCE_DATE_EPOCH $(STAGING_DIR_HOST)/bin/mkfs.erofs -z$(EROFSCOMP) \
+		-C$(EROFS_PCLUSTERSIZE) $(EROFSOPT) \
+		$@ $(call mkfs_target_dir,$(1))
+endef
+
+define Image/mkfs/targz
+	$(TAR) -cp --numeric-owner --owner=0 --group=0 --mode=a-s --sort=name \
+		$(if $(SOURCE_DATE_EPOCH),--mtime="@$(SOURCE_DATE_EPOCH)") \
+		-C $(call mkfs_target_dir,$(1)) . | gzip -9n > $@
+endef
+
 define Image/Manifest
 	$(if $(CONFIG_USE_APK), \
-		$(call apk,$(TARGET_DIR_ORIG)) list --quiet --manifest --no-network | sort | sed 's/ / - /'  > \
+		$(call apk,$(TARGET_DIR_ORIG)) list --quiet --manifest --no-network \
+			--repositories-file /dev/null | sort | sed 's/ / - /'  > \
 			$(BIN_DIR)/$(IMG_PREFIX)$(if $(PROFILE_SANITIZED),-$(PROFILE_SANITIZED)).manifest, \
 		$(call opkg,$(TARGET_DIR_ORIG)) list-installed > \
 			$(BIN_DIR)/$(IMG_PREFIX)$(if $(PROFILE_SANITIZED),-$(PROFILE_SANITIZED)).manifest \
@@ -292,23 +345,7 @@ ifneq ($(CONFIG_JSON_CYCLONEDX_SBOM),)
 endif
 endef
 
-define Image/gzip-ext4-padded-squashfs
-
-  define Image/Build/squashfs
-    $(call Image/pad-root-squashfs)
-  endef
-
-  ifneq ($(CONFIG_TARGET_IMAGES_GZIP),)
-    define Image/Build/gzip/ext4
-      $(call Image/Build/gzip,ext4)
-    endef
-    define Image/Build/gzip/squashfs
-      $(call Image/Build/gzip,squashfs)
-    endef
-  endif
-
-endef
-
+ifeq ($(filter-out targz,$(ROOTFS_FILESYSTEM)),)
 ifdef CONFIG_TARGET_ROOTFS_TARGZ
   define Image/Build/targz
 	$(TAR) -cp --numeric-owner --owner=0 --group=0 --mode=a-s --sort=name \
@@ -316,15 +353,18 @@ ifdef CONFIG_TARGET_ROOTFS_TARGZ
 		-C $(TARGET_DIR)/ . | gzip -9n > $(BIN_DIR)/$(IMG_PREFIX)$(if $(PROFILE_SANITIZED),-$(PROFILE_SANITIZED))-rootfs.tar.gz
   endef
 endif
+endif
 
+ifeq ($(filter-out cpiogz,$(ROOTFS_FILESYSTEM)),)
 ifdef CONFIG_TARGET_ROOTFS_CPIOGZ
   define Image/Build/cpiogz
 	( cd $(TARGET_DIR); find . | $(STAGING_DIR_HOST)/bin/cpio -o -H newc -R 0:0 | gzip -9n >$(BIN_DIR)/$(IMG_ROOTFS).cpio.gz )
   endef
 endif
+endif
 
 mkfs_packages = $(filter-out @%,$(PACKAGES_$(call param_get,pkg,pkg=$(target_params))))
-mkfs_packages_add = $(foreach pkg,$(filter-out -%,$(mkfs_packages)),$(pkg)$(call GetABISuffix,$(pkg)))
+mkfs_packages_add = $(foreach pkg,$(filter-out -% ~%,$(mkfs_packages)),$(pkg)$(call GetABISuffix,$(pkg)))
 mkfs_packages_remove = $(foreach pkg,$(patsubst -%,%,$(filter -%,$(mkfs_packages))),$(pkg)$(call GetABISuffix,$(pkg)))
 mkfs_cur_target_dir = $(call mkfs_target_dir,pkg=$(target_params))
 
@@ -332,19 +372,19 @@ opkg_target = \
 	$(call opkg,$(mkfs_cur_target_dir)) \
 		-f $(mkfs_cur_target_dir).conf
 
-apk_target = $(call apk,$(mkfs_cur_target_dir)) --no-scripts
+apk_target = \
+	$(call apk,$(mkfs_cur_target_dir)) --no-scripts \
+		--repositories-file /dev/null --repository file://$(PACKAGE_DIR_ALL)/packages.adb
 
 
 target-dir-%: FORCE
 ifneq ($(CONFIG_USE_APK),)
 	rm -rf $(mkfs_cur_target_dir)
 	$(CP) $(TARGET_DIR_ORIG) $(mkfs_cur_target_dir)
-	mv $(mkfs_cur_target_dir)/etc/apk/repositories $(mkfs_cur_target_dir).repositories
 	$(if $(mkfs_packages_remove), \
-		$(apk_target) del $(mkfs_packages_remove))
+		-$(apk_target) del $(mkfs_packages_remove))
 	$(if $(mkfs_packages_add), \
 		$(apk_target) add $(mkfs_packages_add))
-	mv $(mkfs_cur_target_dir).repositories $(mkfs_cur_target_dir)/etc/apk/repositories
 else
 	rm -rf $(mkfs_cur_target_dir) $(mkfs_cur_target_dir).opkg
 	$(CP) $(TARGET_DIR_ORIG) $(mkfs_cur_target_dir)
@@ -399,26 +439,53 @@ define Device/InitProfile
   DEVICE_DESCRIPTION = Build firmware images for $$(DEVICE_TITLE)
 endef
 
+##@
+# @brief Image configuration variables.
+#
+# @param 1: Device name.
+##
 define Device/Init
+  ##@ Device name.
   DEVICE_NAME := $(1)
+  ##@ Commands to build kernel.
+  # Commands with arguments are separated by `|`.
+  ##
   KERNEL:=
+  ##@ Commands to build initramfs.
+  # Commands with arguments are separated by `|`.
+  ##
   KERNEL_INITRAMFS = $$(KERNEL)
+  ##@ Kernel command line.
   CMDLINE:=
 
+  ##@ Images to build.
   IMAGES :=
+  ##@ Artifacts to build.
   ARTIFACTS :=
+  ##@ Device image prefix.
   DEVICE_IMG_PREFIX := $(IMG_PREFIX)-$(1)
+  ##@ Device image name.
   DEVICE_IMG_NAME = $$(DEVICE_IMG_PREFIX)-$$(1)-$$(2)
+  ##@ Factory image name.
   FACTORY_IMG_NAME :=
+  ##@ Maximum image size. Optional.
   IMAGE_SIZE :=
+  ##@ Maximum image size. Optional.
   NAND_SIZE :=
+  ##@ Kernel image prefix.
   KERNEL_PREFIX = $$(DEVICE_IMG_PREFIX)
+  ##@ Kernel image suffix.
   KERNEL_SUFFIX := -kernel.bin
+  ##@ Initramfs image suffix.
   KERNEL_INITRAMFS_SUFFIX = $$(KERNEL_SUFFIX)
+  ##@ Kernel image name.
   KERNEL_IMAGE = $$(KERNEL_PREFIX)$$(KERNEL_SUFFIX)
+  ##@ Initramfs image prefix.
   KERNEL_INITRAMFS_PREFIX = $$(DEVICE_IMG_PREFIX)-initramfs
   KERNEL_INITRAMFS_IMAGE = $$(KERNEL_INITRAMFS_PREFIX)$$(KERNEL_INITRAMFS_SUFFIX)
+  ##@ Initramfs image name.
   KERNEL_INITRAMFS_NAME = $$(KERNEL_NAME)-initramfs
+  ##@ Kernel install flag.
   KERNEL_INSTALL :=
   KERNEL_NAME := vmlinux
   KERNEL_DEPENDS :=
@@ -456,6 +523,9 @@ define Device/Init
   SUPPORTED_DEVICES := $(subst _,$(comma),$(1))
   IMAGE_METADATA :=
 
+  ##@ Filesystems to build images for.
+  # Set FILESYSTEMS/<image> to build an image for only some of them.
+  ##
   FILESYSTEMS := $(TARGET_FILESYSTEMS)
 
   UBOOT_PATH :=  $(STAGING_DIR_IMAGE)/uboot-$(1)
@@ -509,7 +579,15 @@ endef
 
 define Device/Check/Common
   _PROFILE_SET = $$(strip $$(foreach profile,$$(PROFILES) DEVICE_$(1),$$(call DEVICE_CHECK_PROFILE,$$(profile))))
-  DEVICE_PACKAGES += $$(call extra_packages,$$(DEVICE_PACKAGES))
+  # Check if device is disabled and if so do not mark to be installed when ImageBuilder is used
+  ifeq ($(IB),1)
+    ifeq ($$(DEFAULT),n)
+      _PROFILE_SET :=
+    endif
+    ifeq ($$(BROKEN),y)
+      _PROFILE_SET :=
+    endif
+  endif
   ifdef TARGET_PER_DEVICE_ROOTFS
     $$(eval $$(call merge_packages,_PACKAGES,$$(DEVICE_PACKAGES) $$(call DEVICE_EXTRA_PACKAGES,$(1))))
     ROOTFS_ID/$(1) := $$(if $$(_PROFILE_SET),$$(call mkfs_packages_id,$$(_PACKAGES)))
@@ -533,11 +611,20 @@ define Device/Build/initramfs
 	  $$(if $$(CONFIG_JSON_OVERVIEW_IMAGE_INFO), $(BUILD_DIR)/json_info_files/$$(KERNEL_INITRAMFS_IMAGE).json,))
 
   $(KDIR)/$$(KERNEL_INITRAMFS_NAME):: image_prepare
-  $(1)-images: $$(if $$(KERNEL_INITRAMFS),$(BIN_DIR)/$$(KERNEL_INITRAMFS_IMAGE))
+  ifdef TARGET_PER_DEVICE_ROOTFS
+    $(KDIR)/$$(KERNEL_INITRAMFS_NAME).$$(ROOTFS_ID/$(1)):: image_prepare target-dir-$$(ROOTFS_ID/$(1))
+	$(call Kernel/CompileImage/Initramfs,$(KDIR)/target-dir-$$(ROOTFS_ID/$(1)),.$$(ROOTFS_ID/$(1)))
+  endif
+  $(1)-initramfs-images: $$(if $$(KERNEL_INITRAMFS),$(BIN_DIR)/$$(KERNEL_INITRAMFS_IMAGE))
+
+  .IGNORE: $(BIN_DIR)/$$(KERNEL_INITRAMFS_IMAGE)
+
   $(BIN_DIR)/$$(KERNEL_INITRAMFS_IMAGE): $(KDIR)/tmp/$$(KERNEL_INITRAMFS_IMAGE)
 	cp $$^ $$@
 
-  $(KDIR)/tmp/$$(KERNEL_INITRAMFS_IMAGE): $(KDIR)/$$(KERNEL_INITRAMFS_NAME) $(CURDIR)/Makefile $$(KERNEL_DEPENDS) image_prepare
+  $(KDIR)/tmp/$$(KERNEL_INITRAMFS_IMAGE): $(KDIR)/$$(KERNEL_INITRAMFS_NAME)$$(strip \
+						$(if $(TARGET_PER_DEVICE_ROOTFS),.$$(ROOTFS_ID/$(1))) \
+					) $(CURDIR)/Makefile $$(KERNEL_DEPENDS) image_prepare
 	@rm -f $$@
 	$$(call concat_cmd,$$(KERNEL_INITRAMFS))
 
@@ -580,6 +667,8 @@ define Device/Build/initramfs
 	VERSION_NUMBER="$(VERSION_NUMBER)" \
 	VERSION_CODE="$(VERSION_CODE)" \
 	SUPPORTED_DEVICES="$$(SUPPORTED_DEVICES)" \
+	KERNEL_SIZE="$$(KERNEL_SIZE)" \
+	IMAGE_SIZE="$$(IMAGE_SIZE)" \
 	$(TOPDIR)/scripts/json_add_image_info.py $$@
 endef
 endif
@@ -601,6 +690,7 @@ define Device/Build/dtb
 	$(call Image/BuildDTB,$(strip $(2))/$(strip $(3)).dts,$$@)
 
   compile-dtb: $(KDIR)/image-$(1).dtb
+  DTBS_TO_CHECK += $(KDIR)/image-$(1).dtb
   endif
 
 endef
@@ -648,12 +738,11 @@ define Device/Build/kernel
 endef
 
 define Device/Build/image
-  GZ_SUFFIX := $(if $(filter %dtb %gz,$(2)),,$(if $(and $(findstring ext4,$(1)),$(CONFIG_TARGET_IMAGES_GZIP)),.gz))
   $$(_TARGET): $(if $(CONFIG_JSON_OVERVIEW_IMAGE_INFO), \
 	  $(BUILD_DIR)/json_info_files/$(call DEVICE_IMG_NAME,$(1),$(2)).json, \
-	  $(BIN_DIR)/$(call DEVICE_IMG_NAME,$(1),$(2))$$(GZ_SUFFIX))
+	  $(BIN_DIR)/$(call DEVICE_IMG_NAME,$(1),$(2)))
   $(eval $(call Device/Export,$(KDIR)/tmp/$(call DEVICE_IMG_NAME,$(1),$(2)),$(1)))
-  $(3)-images: $(BIN_DIR)/$(call DEVICE_IMG_NAME,$(1),$(2))$$(GZ_SUFFIX)
+  $(3)-images: $(BIN_DIR)/$(call DEVICE_IMG_NAME,$(1),$(2))
 
   ROOTFS/$(1)/$(3) := \
 	$(KDIR)/root.$(1)$$(strip \
@@ -664,20 +753,17 @@ define Device/Build/image
   ifndef IB
     $$(ROOTFS/$(1)/$(3)): $(if $(TARGET_PER_DEVICE_ROOTFS),target-dir-$$(ROOTFS_ID/$(3)))
   endif
-  $(KDIR)/tmp/$(call DEVICE_IMG_NAME,$(1),$(2)): $$(KDIR_KERNEL_IMAGE) $$(ROOTFS/$(1)/$(3))
+  $(KDIR)/tmp/$(call DEVICE_IMG_NAME,$(1),$(2)): $$(KDIR_KERNEL_IMAGE) $$(ROOTFS/$(1)/$(3)) $(if $(CONFIG_TARGET_ROOTFS_INITRAMFS),$(if $(IB),,$(3)-initramfs-images))
 	@rm -f $$@
 	[ -f $$(word 1,$$^) -a -f $$(word 2,$$^) ]
 	$$(call concat_cmd,$(if $(IMAGE/$(2)/$(1)),$(IMAGE/$(2)/$(1)),$(IMAGE/$(2))))
 
   .IGNORE: $(BIN_DIR)/$(call DEVICE_IMG_NAME,$(1),$(2))
 
-  $(BIN_DIR)/$(call DEVICE_IMG_NAME,$(1),$(2)).gz: $(KDIR)/tmp/$(call DEVICE_IMG_NAME,$(1),$(2))
-	gzip -c -9n $$^ > $$@
-
   $(BIN_DIR)/$(call DEVICE_IMG_NAME,$(1),$(2)): $(KDIR)/tmp/$(call DEVICE_IMG_NAME,$(1),$(2))
 	cp $$^ $$@
 
-  $(BUILD_DIR)/json_info_files/$(call DEVICE_IMG_NAME,$(1),$(2)).json: $(BIN_DIR)/$(call DEVICE_IMG_NAME,$(1),$(2))$$(GZ_SUFFIX)
+  $(BUILD_DIR)/json_info_files/$(call DEVICE_IMG_NAME,$(1),$(2)).json: $(BIN_DIR)/$(call DEVICE_IMG_NAME,$(1),$(2))
 	@mkdir -p $$(shell dirname $$@)
 	DEVICE_ID="$(DEVICE_NAME)" \
 	SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) \
@@ -714,6 +800,8 @@ define Device/Build/image
 	VERSION_NUMBER="$(VERSION_NUMBER)" \
 	VERSION_CODE="$(VERSION_CODE)" \
 	SUPPORTED_DEVICES="$(SUPPORTED_DEVICES)" \
+	KERNEL_SIZE="$(KERNEL_SIZE)" \
+	IMAGE_SIZE="$(IMAGE_SIZE)" \
 	$(TOPDIR)/scripts/json_add_image_info.py $$@
 
 endef
@@ -723,7 +811,7 @@ define Device/Build/artifact
 	  $(BUILD_DIR)/json_info_files/$(DEVICE_IMG_PREFIX)-$(1).json, \
 	  $(BIN_DIR)/$(DEVICE_IMG_PREFIX)-$(1))
   $(eval $(call Device/Export,$(KDIR)/tmp/$(DEVICE_IMG_PREFIX)-$(1)))
-  $(KDIR)/tmp/$(DEVICE_IMG_PREFIX)-$(1): $$(KDIR_KERNEL_IMAGE) $(2)-images
+  $(KDIR)/tmp/$(DEVICE_IMG_PREFIX)-$(1): $$(KDIR_KERNEL_IMAGE) $(if $(CONFIG_TARGET_ROOTFS_INITRAMFS),$(if $(IB),,$(2)-initramfs-images)) $(2)-images
 	@rm -f $$@
 	$$(call concat_cmd,$(ARTIFACT/$(1)))
 
@@ -768,20 +856,27 @@ define Device/Build/artifact
 	VERSION_NUMBER="$(VERSION_NUMBER)" \
 	VERSION_CODE="$(VERSION_CODE)" \
 	SUPPORTED_DEVICES="$(SUPPORTED_DEVICES)" \
+	KERNEL_SIZE="$(KERNEL_SIZE)" \
+	IMAGE_SIZE="$(IMAGE_SIZE)" \
 	$(TOPDIR)/scripts/json_add_image_info.py $$@
 
 endef
 
 define Device/Build
-  $(if $(CONFIG_TARGET_ROOTFS_INITRAMFS),$(call Device/Build/initramfs,$(1)))
+  $(if $(CONFIG_TARGET_ROOTFS_INITRAMFS),$$(eval $$(call Device/Build/initramfs,$(1))))
   $(call Device/Build/kernel,$(1))
 
   $$(eval $$(foreach compile,$$(COMPILE), \
     $$(call Device/Build/compile,$$(compile),$(1))))
 
   $$(eval $$(foreach image,$$(IMAGES), \
-    $$(foreach fs,$$(filter $(TARGET_FILESYSTEMS),$$(FILESYSTEMS)), \
+    $$(foreach fs,$$(filter $$(filter-out targz,$(TARGET_FILESYSTEMS)), \
+        $$(filter $$(or $$(FILESYSTEMS/$$(image)),$$(FILESYSTEMS)),$$(FILESYSTEMS))), \
       $$(call Device/Build/image,$$(fs),$$(image),$(1)))))
+
+  $(if $(CONFIG_TARGET_ROOTFS_TARGZ), \
+    IMAGE/rootfs.tar.gz := append-rootfs
+    $$(eval $$(call Device/Build/image,targz,rootfs.tar.gz,$(1))))
 
   $$(eval $$(foreach artifact,$$(ARTIFACTS), \
     $$(call Device/Build/artifact,$$(artifact),$(1))))
@@ -844,8 +939,17 @@ define Device
   $(call Device/Default,$(1))
   $(call Device/$(1),$(1))
   $(call Device/Check,$(1))
-  $(call Device/$(if $(DUMP),Dump,Build),$(1))
+  $(if $(DUMP),$(call Device/Dump,$(1)),$(call Device/BuildSelected,$(1)))
 
+endef
+
+# The rules of a device that is not selected can not be reached, and a
+# target defines more than 100 devices, so do not define them. The whole
+# image Makefile is parsed twice per build.
+define Device/BuildSelected
+  ifneq ($(CONFIG_IB)$$(_PROFILE_SET),)
+$(call Device/Build,$(1))
+  endif
 endef
 
 define BuildImage
@@ -860,11 +964,12 @@ define BuildImage
   prepare:
   compile:
   compile-dtb:
+  check-dtb:
   clean:
   image_prepare:
 
   ifeq ($(IB),)
-    .PHONY: download prepare compile compile-dtb clean image_prepare kernel_prepare install install-images
+    .PHONY: download prepare compile compile-dtb check-dtb clean image_prepare kernel_prepare install install-images
     compile:
 		$(call Build/Compile)
 
@@ -872,6 +977,11 @@ define BuildImage
 		$(call Build/Clean)
 
     compile-dtb:
+    check-dtb: compile-dtb
+	@for dtb in $$(sort $$(DTBS_TO_CHECK)); do \
+		dt-validate -s $(LINUX_DIR)/Documentation/devicetree/bindings/processed-schema.json \
+			$(if $(DT_SCHEMA_FILES),-l "$(DT_SCHEMA_FILES)",-m) "$$$$dtb" || exit 1; \
+	done
     image_prepare: compile compile-dtb
 		mkdir -p $(BIN_DIR) $(KDIR)/tmp
 		rm -rf $(BUILD_DIR)/json_info_files

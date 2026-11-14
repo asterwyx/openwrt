@@ -482,6 +482,9 @@ radius_user_get_state(struct radius_user_data *u, struct blob_attr *data,
 			 &astate.attr, n_attr * sizeof(*astate.attr),
 			 &astate.buf, n_attr * sizeof(*astate.buf),
 			 &astate.attrdata, attrsize);
+	if (!state)
+		goto free;
+
 	eap = &state->data;
 	eap->salt = salt_len ? salt_buf : NULL;
 	eap->salt_len = salt_len;
@@ -564,10 +567,18 @@ static int radius_setup(struct radius_state *s, struct radius_config *c)
 		.cb_ctx = s,
 	};
 
+	/* Most backends ignore tls_config.tls_flags, and OpenSSL / wolfSSL
+	 * only apply the protocol version flags per connection, from
+	 * eap_config.tls_flags. Pass identical flags in all three places. */
+	c->tls.flags |= conf.tls_flags;
+	conf.tls_flags = c->tls.flags;
+	eap->tls_flags = c->tls.flags;
+
 	eap->eap_server = 1;
 	eap->max_auth_rounds = 100;
 	eap->max_auth_rounds_short = 50;
 	eap->ssl_ctx = tls_init(&conf);
+	eap->pwd_group = 19;
 	if (!eap->ssl_ctx) {
 		wpa_printf(MSG_INFO, "TLS init failed\n");
 		return 1;
@@ -613,6 +624,8 @@ static int usage(const char *progname)
 {
 	fprintf(stderr, "Usage: %s <options>\n",
 		progname);
+
+	return 1;
 }
 
 int radius_main(int argc, char **argv)
@@ -624,7 +637,6 @@ int radius_main(int argc, char **argv)
 	int ch;
 
 	wpa_debug_setup_stdout();
-	wpa_debug_level = 0;
 
 	if (eloop_init()) {
 		wpa_printf(MSG_ERROR, "Failed to initialize event loop");
@@ -634,10 +646,13 @@ int radius_main(int argc, char **argv)
 	eap_server_register_methods();
 	radius_init(&state);
 
-	while ((ch = getopt(argc, argv, "6C:c:d:i:k:K:p:P:s:u:")) != -1) {
+	while ((ch = getopt(argc, argv, "6l:C:c:d:i:k:K:p:P:s:u:")) != -1) {
 		switch (ch) {
 		case '6':
 			config.radius.ipv6 = 1;
+			break;
+		case 'l':
+			wpa_debug_level = atoi(optarg);
 			break;
 		case 'C':
 			config.tls.ca_cert = optarg;

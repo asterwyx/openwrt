@@ -1,6 +1,7 @@
 RAMFS_COPY_BIN='osafeloader oseama otrx truncate'
 
 PART_NAME=firmware
+REQUIRE_IMAGE_METADATA=0
 
 BCM53XX_FW_FORMAT=
 BCM53XX_FW_BOARD_ID=
@@ -52,6 +53,14 @@ platform_expected_image() {
 		"luxul,xwr-3150-v1")	echo "lxl XWR-3150"; return;;
 		"netgear,r6250-v1")	echo "chk U12H245T00_NETGEAR"; return;;
 		"netgear,r6300-v2")	echo "chk U12H240T00_NETGEAR"; return;;
+		"netgear,r6400-v1")	echo "chk U12H332T00_NETGEAR"; return;;
+		"netgear,r6400-v2")
+			# T20 and the OTP variant T30 are the same board
+			case "$BCM53XX_FW_BOARD_ID" in
+			U12H332T20_NETGEAR|U12H332T30_NETGEAR) echo "chk $BCM53XX_FW_BOARD_ID";;
+			*) echo "chk U12H332T20_NETGEAR";;
+			esac
+			return;;
 		"netgear,r7000")	echo "chk U12H270T00_NETGEAR"; return;;
 		"netgear,r7900")	echo "chk U12H315T30_NETGEAR"; return;;
 		"netgear,r8000")	echo "chk U12H315T00_NETGEAR"; return;;
@@ -198,13 +207,13 @@ platform_check_image() {
 
 	board="$(board_name)"
 	case "$board" in
-	# Ideally, REQUIRE_IMAGE_METADATA=1 would suffice
-	# but this would require converting all other
-	# devices too.
 	meraki,mr26 | \
-	meraki,mr32)
-		nand_do_platform_check "${board//,/_}" "$1"
-		return $?
+	meraki,mr32 | \
+	meraki,mx64 | \
+	meraki,mx64-a0 | \
+	meraki,mx65)
+		# NAND sysupgrade
+		return 0
 		;;
 	*)
 		platform_other_check_image "$1"
@@ -236,7 +245,7 @@ platform_do_upgrade_nand_trx() {
 	}
 
 	# Firmwares without UBI image should be flashed "normally"
-	local root_type=$(identify $dir/root)
+	local root_type=$(identify "$dir/root" "cat")
 	[ "$root_type" != "ubi" ] && {
 		echo "Provided firmware doesn't use UBI for rootfs."
 		return
@@ -401,7 +410,14 @@ platform_do_upgrade() {
 	case "$(board_name)" in
 	meraki,mr26 | \
 	meraki,mr32)
+		REQUIRE_IMAGE_METADATA=1
 		CI_KERNPART="part.safe"
+		nand_do_upgrade "$1"
+		;;
+	meraki,mx64 | \
+	meraki,mx64-a0 | \
+	meraki,mx65)
+		REQUIRE_IMAGE_METADATA=1
 		nand_do_upgrade "$1"
 		;;
 	*)

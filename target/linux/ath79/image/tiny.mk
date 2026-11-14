@@ -1,4 +1,5 @@
 include ./common-buffalo.mk
+include ./common-nec.mk
 include ./common-senao.mk
 
 define Device/buffalo_whr-g301n
@@ -80,7 +81,6 @@ TARGET_DEVICES += dlink_dir-869-a1
 
 define Device/engenius_eap350-v1
   $(Device/senao_loader_okli)
-  BLOCKSIZE := 4k
   SOC := ar7242
   DEVICE_VENDOR := EnGenius
   DEVICE_MODEL := EAP350
@@ -94,7 +94,6 @@ TARGET_DEVICES += engenius_eap350-v1
 
 define Device/engenius_ecb350-v1
   $(Device/senao_loader_okli)
-  BLOCKSIZE := 4k
   SOC := ar7242
   DEVICE_VENDOR := EnGenius
   DEVICE_MODEL := ECB350
@@ -120,6 +119,57 @@ define Device/engenius_enh202-v1
 endef
 TARGET_DEVICES += engenius_enh202-v1
 
+define Device/nec_wf1200hp
+  DEVICE_MODEL := Aterm WF1200HP
+  SOC := ar9344
+  IMAGE_SIZE := 7936k
+  NEC_FW_TYPE := H047
+  $(Device/nec-netbsd-aterm)
+  DEVICE_PACKAGES := kmod-ath10k-ct-smallbuffers ath10k-firmware-qca988x-ct \
+	-uboot-envtools
+  UBOOT_PATH := $$(STAGING_DIR_IMAGE)/$$(SOC)_nec_aterm_fe-u-boot.bin
+endef
+TARGET_DEVICES += nec_wf1200hp
+
+define Device/nec_wf1200hp2
+  DEVICE_MODEL := Aterm WF1200HP2
+  SOC := ar9344
+  IMAGE_SIZE := 7936k
+  NEC_FW_TYPE := H053
+  $(Device/nec-netbsd-aterm)
+  DEVICE_PACKAGES := kmod-ath10k-ct-smallbuffers ath10k-firmware-qca988x-ct \
+	-uboot-envtools
+  UBOOT_PATH := $$(STAGING_DIR_IMAGE)/$$(SOC)_nec_aterm_fe-u-boot.bin
+endef
+TARGET_DEVICES += nec_wf1200hp2
+
+define Device/nec_wg600hp
+  DEVICE_MODEL := Aterm WG600HP
+  SOC := ar9344
+  IMAGE_SIZE := 7936k
+  NEC_FW_TYPE := H044
+  $(Device/nec-netbsd-aterm)
+endef
+TARGET_DEVICES += nec_wg600hp
+
+define Device/nec_wr8750n
+  SOC := ar9344
+  DEVICE_MODEL := Aterm WR8750N
+  IMAGE_SIZE := 7936k
+  NEC_FW_TYPE := H033a
+  $(Device/nec-netbsd-aterm)
+endef
+TARGET_DEVICES += nec_wr8750n
+
+define Device/nec_wr9500n
+  SOC := ar9344
+  DEVICE_MODEL := Aterm WR9500N
+  IMAGE_SIZE := 16128k
+  NEC_FW_TYPE := H033
+  $(Device/nec-netbsd-aterm)
+endef
+TARGET_DEVICES += nec_wr9500n
+
 define Device/pqi_air-pen
   SOC := ar9330
   DEVICE_VENDOR := PQI
@@ -130,3 +180,16 @@ define Device/pqi_air-pen
   DEFAULT := n
 endef
 TARGET_DEVICES += pqi_air-pen
+
+define Device/sitecom_wlr-7100
+  SOC := ar1022
+  DEVICE_VENDOR := Sitecom
+  DEVICE_MODEL := WLR-7100
+  DEVICE_PACKAGES := ath10k-firmware-qca988x-ct kmod-ath10k-ct-smallbuffers kmod-usb2
+  IMAGES += factory.dlf
+  IMAGE/factory.dlf := append-kernel | pad-to $$$$(BLOCKSIZE) | \
+	append-rootfs | pad-rootfs | check-size | \
+	senao-header -r 0x222 -p 0x53 -t 2
+  IMAGE_SIZE := 7872k
+endef
+TARGET_DEVICES += sitecom_wlr-7100

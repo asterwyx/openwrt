@@ -63,19 +63,11 @@
 			color = <LED_COLOR_ID_ORANGE>;
 			gpios = <&gpio 14 GPIO_ACTIVE_LOW>;
 		};
-
-		wifi {
-			label = "blue:wifi";
-			gpios = <&gpio 0 GPIO_ACTIVE_HIGH>;
-			linux,default-trigger = "phy0tpt";
-		};
 	};
 };
 
 &usb0 {
 	status = "okay";
-
-	dr_mode = "host";
 };
 
 &usb_phy {
@@ -119,7 +111,7 @@
 				reg = <0x150000 0xea0000>;
 			};
 
-			art: partition@ff0000 {
+			partition@ff0000 {
 				label = "art";
 				reg = <0xff0000 0x010000>;
 				read-only;
@@ -176,4 +168,8 @@
 
 	nvmem-cells = <&cal_art_1000>, <&macaddr_art_1002>;
 	nvmem-cell-names = "calibration", "mac-address";
+
+	led {
+		led-sources = <0>;
+	};
 };

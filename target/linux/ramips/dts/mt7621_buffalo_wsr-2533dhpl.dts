@@ -159,7 +159,7 @@
 			};
 
 			partition@50000 {
-				compatible = "openwrt,trx";
+				compatible = "brcm,trx";
 				label = "firmware";
 				reg = <0x50000 0x7c0000>;
 			};
@@ -256,6 +256,10 @@
 		groups = "i2c", "uart2", "uart3", "wdt", "sdhci";
 		function = "gpio";
 	};
+};
+
+&usb_phy {
+	status = "disabled";
 };
 
 &xhci {

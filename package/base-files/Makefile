@@ -21,7 +21,10 @@ PKG_LICENSE:=GPL-2.0
 
 # Extend depends from version.mk
 PKG_CONFIG_DEPENDS += \
-	CONFIG_SIGNED_PACKAGES CONFIG_TARGET_INIT_PATH CONFIG_TARGET_PREINIT_DISABLE_FAILSAFE \
+	CONFIG_SIGNED_PACKAGES \
+	CONFIG_TARGET_INIT_PATH \
+	CONFIG_TARGET_PREINIT_DISABLE_FAILSAFE \
+	CONFIG_TARGET_SERIAL \
 	CONFIG_NAND_SUPPORT \
 	CONFIG_LEGACY_SDCARD_SUPPORT \
 	CONFIG_EMMC_SUPPORT \
@@ -39,9 +42,14 @@ endif
 define Package/base-files
   SECTION:=base
   CATEGORY:=Base system
-  DEPENDS:=+netifd +libc +jsonfilter +SIGNED_PACKAGES:usign +SIGNED_PACKAGES:openwrt-keyring +NAND_SUPPORT:ubi-utils +fstools +fwtool
+  DEPENDS:= \
+	+netifd +libc +jsonfilter +SIGNED_PACKAGES:usign +SIGNED_PACKAGES:openwrt-keyring \
+	+NAND_SUPPORT:ubi-utils +fstools +fwtool \
+	+SELINUX:procd-selinux +!SELINUX:procd +USE_SECCOMP:procd-seccomp \
+	+SELINUX:busybox-selinux +!SELINUX:busybox \
+	+ucode +ucode-mod-fs +ucode-mod-digest
   TITLE:=Base filesystem for OpenWrt
-  URL:=http://openwrt.org/
+  URL:=https://openwrt.org/
   VERSION:=$(PKG_RELEASE)~$(lastword $(subst -, ,$(REVISION)))
 endef
 
@@ -49,7 +57,6 @@ define Package/base-files/conffiles
 /etc/config/
 /etc/config/network
 /etc/config/system
-/etc/dropbear/
 /etc/ethers
 /etc/group
 /etc/hosts
@@ -77,7 +84,7 @@ endef
 define ImageConfigOptions
 	mkdir -p $(1)/lib/preinit
 	echo 'pi_suppress_stderr="$(CONFIG_TARGET_PREINIT_SUPPRESS_STDERR)"' >$(1)/lib/preinit/00_preinit.conf
-	echo 'fs_failsafe_wait_timeout=$(if $(CONFIG_TARGET_PREINIT_TIMEOUT),$(CONFIG_TARGET_PREINIT_TIMEOUT),2)' >>$(1)/lib/preinit/00_preinit.conf
+	echo 'fs_failsafe_wait_timeout=$(if $(CONFIG_TARGET_PREINIT_TIMEOUT),$(CONFIG_TARGET_PREINIT_TIMEOUT),4)' >>$(1)/lib/preinit/00_preinit.conf
 	echo 'pi_init_path="$(TARGET_INIT_PATH)"' >>$(1)/lib/preinit/00_preinit.conf
 	echo 'pi_init_env=$(if $(CONFIG_TARGET_INIT_ENV),$(CONFIG_TARGET_INIT_ENV),"")' >>$(1)/lib/preinit/00_preinit.conf
 	echo 'pi_init_cmd=$(if $(CONFIG_TARGET_INIT_CMD),$(CONFIG_TARGET_INIT_CMD),"/sbin/init")' >>$(1)/lib/preinit/00_preinit.conf
@@ -190,6 +197,7 @@ define Package/base-files/install
 
 	$(SED) "s#%PATH%#$(TARGET_INIT_PATH)#g" \
 		$(1)/sbin/hotplug-call \
+		$(1)/sbin/preinit-netdev \
 		$(1)/etc/preinit \
 		$(1)/etc/profile
 
@@ -221,8 +229,11 @@ ifneq ($(CONFIG_TARGET_ROOTFS_PERSIST_VAR),y)
 else
 	mkdir -p $(1)/var
 	$(LN) /tmp/run $(1)/var/run
+	$(LN) ../tmp/lock $(1)/var/lock
+	mkdir -p $(1)/tmp/lock
 endif
 	$(LN) /tmp/resolv.conf /tmp/TZ /tmp/localtime $(1)/etc/
+	$(LN) /tmp/sysinfo/board.json $(1)/etc/board.json
 
 	chmod 0600 $(1)/etc/shadow
 	chmod 1777 $(1)/tmp
@@ -246,9 +257,13 @@ endif
 		rm -f $(1)/etc/banner.failsafe,)
 
 ifneq ($(CONFIG_USE_APK),)
-	mkdir -p $(1)/etc/apk/
-	$(call FeedSourcesAppendAPK,$(1)/etc/apk/repositories)
-	$(VERSION_SED_SCRIPT) $(1)/etc/apk/repositories
+	mkdir -p $(1)/etc/apk/repositories.d
+	$(call FeedSourcesAppendAPK,$(1)/etc/apk/repositories.d/distfeeds.list)
+	$(VERSION_SED_SCRIPT) $(1)/etc/apk/repositories.d/distfeeds.list
+
+	rm -f $(1)/etc/uci-defaults/13_fix-group-user
+	rm -f $(1)/sbin/pkg_check
+	echo $(PKG_RELEASE)~$(lastword $(subst -, ,$(REVISION))) >$(STAGING_DIR)/base-files.version
 else
 	$(if $(CONFIG_CLEAN_IPKG),, \
 		mkdir -p $(1)/etc/opkg; \
@@ -257,6 +272,16 @@ else
 	$(if $(CONFIG_IPK_FILES_CHECKSUMS),, \
 		rm -f $(1)/sbin/pkg_check)
 endif
+	$(if $(CONFIG_TARGET_BUTTON_CUSTOMIZATION_FAILSAFE_DISABLED), \
+		rm -f $(1)/etc/rc.button/failsafe)
+	$(if $(CONFIG_TARGET_BUTTON_CUSTOMIZATION_POWER_DISABLED), \
+		rm -f $(1)/etc/rc.button/power)
+	$(if $(CONFIG_TARGET_BUTTON_CUSTOMIZATION_REBOOT_DISABLED), \
+		rm -f $(1)/etc/rc.button/reboot)
+	$(if $(CONFIG_TARGET_BUTTON_CUSTOMIZATION_RESET_DISABLED), \
+		rm -f $(1)/etc/rc.button/reset)
+	$(if $(CONFIG_TARGET_BUTTON_CUSTOMIZATION_RF_KILL_DISABLED), \
+		rm -f $(1)/etc/rc.button/rfkill)
 endef
 
 ifneq ($(DUMP),1)

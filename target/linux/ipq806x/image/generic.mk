@@ -1,3 +1,4 @@
+DTS_DIR := $(DTS_DIR)/qcom
 DEVICE_VARS += NETGEAR_BOARD_ID NETGEAR_HW_ID
 DEVICE_VARS += TPLINK_BOARD_ID
 
@@ -35,6 +36,30 @@ define Build/edimax-header
 	@mv $@.new $@
 endef
 
+# tune addpattern for Linksys E8350-V1 fw pattern generation
+define Build/linksys-bin
+        $(STAGING_DIR_HOST)/bin/addpattern -p $(FW_DEVICE_ID) -v $(FW_VERSION) $(if $(SERIAL),-s $(SERIAL)) -i $@ -o $@.new
+        mv $@.new $@
+endef
+
+# Use Linksys fw header generator to upgrade openwrt factory image over the native Linksys WEB interface
+define Build/linksys-addfwhdr
+        -$(STAGING_DIR_HOST)/bin/linksys-addfwhdr -i $@ -o $@.new \
+       	;mv "$@.new" "$@"
+endef
+
+define Build/apboot-addfwhdr
+	$(SCRIPT_DIR)/aruba-header.py \
+		$@ $@.new \
+		"$(call toupper,$(LINUX_KARCH)) $(VERSION_DIST) Linux-$(LINUX_VERSION), $(VERSION_NUMBER) $(VERSION_CODE)"\
+		"$(VERSION_NUMBER)" \
+		"$(VERSION_DIST)" \
+		os \
+		"$(word 1,$(1))"
+
+	mv "$@.new" "$@"
+endef
+
 define Device/DniImage
 	KERNEL_SUFFIX := -uImage
 	KERNEL = kernel-bin | append-dtb | uImage none
@@ -62,7 +87,7 @@ define Device/TpSafeImage
 		tplink-safeloader sysupgrade | append-metadata
 endef
 
-define Device/ZyXELImage
+define Device/ZyxelImage
 	KERNEL_SUFFIX := -uImage
 	KERNEL = kernel-bin | append-dtb | uImage none | \
 		pad-to $$(KERNEL_SIZE)
@@ -88,6 +113,29 @@ define Device/arris_tr4400-v2
 	KERNEL_IN_UBI := 1
 endef
 TARGET_DEVICES += arris_tr4400-v2
+
+define Device/aruba_ap-32x
+	$(call Device/LegacyImage)
+	DEVICE_VENDOR := Aruba
+	DEVICE_MODEL := AP-325
+	DEVICE_ALT0_VENDOR := Aruba
+	DEVICE_ALT0_MODEL := AP-324
+	DEVICE_ALT1_VENDOR := Siemens
+	DEVICE_ALT1_MODEL := Scalance W1750D
+	SOC := qcom-ipq8068
+	PAGESIZE := 2048
+	BLOCKSIZE := 128k
+	KERNEL_SUFFIX := .ari
+	KERNEL = kernel-bin | append-dtb | uImage none | apboot-addfwhdr Octomore
+	KERNEL_LOADADDR = 0x41508000
+	KERNEL_SIZE := 30720k
+	UBOOT_PATH := $$(STAGING_DIR_IMAGE)/aruba_ap-32x-apboot.mbn
+	ARTIFACTS := apboot.mbn
+	ARTIFACT/apboot.mbn := append-uboot
+	DEVICE_PACKAGES := ath10k-firmware-qca99x0-ct kmod-i2c-gpio kmod-tpm-i2c-atmel \
+		apboot-aruba-ipq806x ipq-wifi-aruba_ap-325
+endef
+TARGET_DEVICES += aruba_ap-32x
 
 define Device/askey_rt4230w-rev6
 	$(call Device/LegacyImage)
@@ -188,6 +236,38 @@ define Device/fortinet_fap-421e
 	DEVICE_PACKAGES := ath10k-firmware-qca99x0-ct
 endef
 TARGET_DEVICES += fortinet_fap-421e
+
+define Device/ignitenet_ss-w2-ac2600
+	$(call Device/FitImage)
+	$(call Device/UbiFit)
+	DEVICE_VENDOR := IgniteNet
+	DEVICE_MODEL := SunSpot AC Wave2
+	DEVICE_ALT0_VENDOR := Accton Technology Corporation
+	DEVICE_ALT0_MODEL := EAP1024A
+	DEVICE_ALT0_VARIANT := V2
+	SOC := qcom-ipq8068
+	BLOCKSIZE := 128k
+	PAGESIZE := 2048
+	DEVICE_PACKAGES := ath10k-firmware-qca9984-ct ipq-wifi-ignitenet_ss-w2-ac2600
+endef
+TARGET_DEVICES += ignitenet_ss-w2-ac2600
+
+define Device/linksys_e8350-v1
+	$(call Device/LegacyImage)
+	DEVICE_VENDOR := Linksys
+	DEVICE_MODEL := E8350
+	DEVICE_VARIANT := v1
+	SOC := qcom-ipq8064
+	FW_VERSION := v1.0.03.003
+	FW_DEVICE_ID := 8350
+	PAGESIZE := 2048
+	BLOCKSIZE := 128k
+	KERNEL_IN_UBI := 1
+	IMAGES = factory.bin sysupgrade.bin
+	IMAGE/factory.bin := append-ubi | check-size 0x04000000 | linksys-addfwhdr | linksys-bin
+	DEVICE_PACKAGES := ath10k-firmware-qca988x-ct
+endef
+TARGET_DEVICES += linksys_e8350-v1
 
 define Device/linksys_ea7500-v1
 	$(call Device/LegacyImage)
@@ -333,6 +413,9 @@ define Device/netgear_r7500
 	BOARD_NAME := r7500
 	SUPPORTED_DEVICES += r7500
 	DEVICE_PACKAGES := ath10k-firmware-qca988x-ct
+	DEVICE_COMPAT_VERSION := 2.0
+	DEVICE_COMPAT_MESSAGE := Sysupgrade does not work due to rootfs ubi partition size change. \
+		Use factory image with the TFTP recovery flash routine.
 endef
 TARGET_DEVICES += netgear_r7500
 
@@ -413,7 +496,7 @@ define Device/nokia_ac400i
 	BLOCKSIZE := 128k
 	PAGESIZE := 2048
 	BOARD_NAME := ac400i
-	DEVICE_PACKAGES := ath10k-firmware-qca9984-ct
+	DEVICE_PACKAGES := ath10k-firmware-qca9984-ct kmod-hwmon-lm75
 endef
 TARGET_DEVICES += nokia_ac400i
 
@@ -549,7 +632,7 @@ TARGET_DEVICES += ubnt_unifi-ac-hd
 
 define Device/zyxel_nbg6817
 	$(Device/dsa-migration)
-	DEVICE_VENDOR := ZyXEL
+	DEVICE_VENDOR := Zyxel
 	DEVICE_MODEL := NBG6817
 	SOC := qcom-ipq8065
 	KERNEL_SIZE := 4096k
@@ -561,6 +644,6 @@ define Device/zyxel_nbg6817
 	SUPPORTED_DEVICES += nbg6817
 	DEVICE_PACKAGES := ath10k-firmware-qca9984-ct e2fsprogs \
 		kmod-fs-ext4 losetup
-	$(call Device/ZyXELImage)
+	$(call Device/ZyxelImage)
 endef
 TARGET_DEVICES += zyxel_nbg6817
